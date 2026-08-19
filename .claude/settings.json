@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /home/codedog/2025.2/Vitis/data/parts/xilinx -maxdepth 2 -mindepth 2 -type d | sort | head -40)",
+      "Read(//home/codedog/2025.2/data/parts/xilinx/**)",
+      "Bash(ls /home/codedog/2025.2/Vitis/data/parts/xilinx/virtex7/public/ | grep \"^xc7z020\" | head -10)",
+      "Read(//home/codedog/2025.2/Vitis/data/parts/xilinx/virtex7/**)",
+      "Bash(ls /home/codedog/2025.2/Vitis/data/parts/xilinx/virtex7/public/ | head -20)",
+      "Bash(find /home/codedog/2025.2 -name \"partlist*\" -o -name \"*.partdb\" 2>/dev/null | head -10)",
+      "Read(//home/codedog/2025.2/**)"
+    ]
+  }
+}

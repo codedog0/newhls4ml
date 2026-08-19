@@ -1,0 +1,67 @@
+# ============================================================================
+# Diagnostic sweep: same MNIST model, but force ONLY the last Dense layer
+# (dense_2, 64->10, 640 multiplies -- small enough to fully unroll) to
+# Strategy: Latency / ReuseFactor: 1, instead of inheriting the model-wide
+# Strategy: Resource / ReuseFactor: 64. dense_1 (784x64) is untouched and
+# stays Resource/RF=64 so this run stays as fast as the main sweep.
+#
+# Purpose: test whether the "no LUT/DSP difference between standard,
+# lsb_zero_k4, lsb_zero_k8" result in sweep_mnist.yaml is an artifact of
+# Resource-strategy multiplier *sharing* (one physical multiplier reused
+# across 64 iterations, which Vivado binds to a full DSP48 regardless of
+# provably-zero operand bits) rather than something about the multiplier
+# techniques themselves. See OPTIMIZATION_RESULTS.md for the tiny-model
+# result (Strategy: Latency, ReuseFactor: 1 there too) that DID show
+# differences, for comparison.
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: unrolled_baseline
+    overrides:
+      pipeline:
+        - name: set_strategy
+          target: by_name
+          names: [dense_2]
+          config: {strategy: Latency}
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_2]
+          config: {reuse_factor: 1}
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: standard}
+
+  - tag: unrolled_lsb_zero_k4
+    overrides:
+      pipeline:
+        - name: set_strategy
+          target: by_name
+          names: [dense_2]
+          config: {strategy: Latency}
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_2]
+          config: {reuse_factor: 1}
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lsb_zero_k4}
+
+  - tag: unrolled_lsb_zero_k8
+    overrides:
+      pipeline:
+        - name: set_strategy
+          target: by_name
+          names: [dense_2]
+          config: {strategy: Latency}
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_2]
+          config: {reuse_factor: 1}
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lsb_zero_k8}

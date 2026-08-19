@@ -1,0 +1,111 @@
+# ============================================================================
+# Plug-and-play optimization pipeline for hls4ml + Vivado
+#
+# Run from the repo root:
+#     python scripts/optimize_hls4ml.py --config scripts/pipeline.yaml
+#
+# Each entry under `pipeline:` is applied sequentially to the hls4ml model
+# graph. Each stage can target one of:
+#   target: all              (default) -- every layer in the graph
+#   target: last_layer                  -- the LAST multiply-having layer only
+#                                          (skips Input/Flatten/Reshape/Activation).
+#                                          Add `layer_type: Dense` to restrict to
+#                                          the last layer of a specific type
+#                                          (e.g. the last Dense / classifier head
+#                                          of a CNN).
+#   target: by_name                     -- the layer(s) whose .name is in `names:`
+#   layers: [Dense, Conv1D]            -- (legacy) every layer of the given type
+#
+# Multiplier strategies (`mult_strategy`) you can pick from:
+#   standard       -- exact signed multiply (Vivado infers a DSP)
+#   lpor_k4 / k8   -- Lower-Part-OR approximate multiplier (k = 4 or 8)
+#   lsb_zero_k4    -- truncate bottom 4 bits of both operands, then exact multiply
+#   comp42_k4 / k8 -- 4:2-compressor-based approximate multiplier (k = 4 or 8)
+#   random_lsb_k4/k8 -- replace the lo*lo quadrant with a pseudo-random bit pattern
+#                       (NO arithmetic on the LSBs -> saves LUTs because the lo*lo
+#                        multiplier collapses to constants at synthesis time)
+# ============================================================================
+
+# --- Source model ------------------------------------------------------------
+# `framework: auto` will auto-detect keras/onnx/pytorch from the file extension.
+# Replace the path with your own model. The default below points to a tiny Keras 3
+# model shipped under scripts/; regenerate it with `make_tiny_model.py` if needed.
+model:
+  path: ./scripts/tiny_mlp.keras
+  framework: keras
+
+# --- hls4ml backend + project settings --------------------------------------
+backend: vitis                 # one of: vivado, vitis, quartus, catapult, ...
+project_name: myproject
+output_dir: ./hls_output       # directory the HLS C++ project is written to
+# Optional: target a specific FPGA part (omit to use backend default).
+# NOTE: this machine's Vitis 2025.2 install only has device libraries for the
+# Artix-7 family; the hls4ml default part (xcvu13p, UltraScale+) is not
+# installed here, so we pin an Artix-7 part that is.
+part: xc7a200tfbg484-2       # Artix-7 200T (e.g. Digilent Nexys Video)
+clock_period: 5                # ns
+io_type: io_parallel           # one of: io_parallel, io_stream
+
+# --- Model-wide defaults (applied first; stages below can override per-layer)
+model_config:
+  Precision: fixed<16,6>
+  ReuseFactor: 1
+  Strategy: Latency            # one of: Latency, Resource, ResourceUnrolled
+
+# --- Sequential optimization pipeline ---------------------------------------
+#
+# The default pipeline below demonstrates the user's two new requirements:
+#   (1) Apply an approximate multiplier ONLY to the LAST layer of the CNN
+#       (here, the last Dense / classifier head). Just change `mult_strategy`
+#       below to swap techniques -- no code edits needed.
+#   (2) A dedicated `set_random_lsb` stage with an explicit `enabled: true/false`
+#       switch. Flip it to false to disable the random-LSB technique.
+pipeline:
+  # Stage 1: pick the multiplier strategy for ONLY the last layer of the network.
+  # (Use `layer_type: Dense` if you want the last Dense layer specifically;
+  #  omit it to let the script auto-pick the last multiply-having layer.)
+  - name: set_mult_strategy
+    target: last_layer
+    layer_type: Dense           # last Dense layer == classifier head of a CNN
+    config:
+      mult_strategy: comp42_k4  # standard | lpor_k4 | lpor_k8 | lsb_zero_k4 | comp42_k4 | comp42_k8 | random_lsb_k4 | random_lsb_k8
+
+  # Stage 2: turn on the random-LSB technique (replaces the LSB multiplication
+  # with a pseudo-random bit pattern, NO arithmetic on LSBs, saves LUTs).
+  # Set `enabled: false` to turn it off without touching anything else.
+  - name: set_random_lsb
+    target: last_layer
+    layer_type: Dense
+    config:
+      enabled: true             # <-- flip this to false to disable
+      k: 4                      # 4 or 8
+
+  # Stage 3: set reuse factor on all Dense layers (note: target: all + layers filter)
+  - name: set_reuse_factor
+    target: all
+    layers: [Dense]
+    config:
+      reuse_factor: 1
+
+  # Stage 4: set implementation strategy on all Dense layers
+  - name: set_strategy
+    target: all
+    layers: [Dense]
+    config:
+      strategy: Latency
+
+  # Stage 5 (optional): per-layer precision override.
+  # - name: set_precision
+  #   target: all
+  #   layers: [Dense]
+  #   config:
+  #     accum_precision: fixed<24,8>
+  #     weight_precision: fixed<16,6>
+
+# --- Optional: invoke Vivado/Vitis HLS after generating the project ---------
+synthesis:
+  enabled: true                # set true to actually run Vivado/Vitis HLS
+  csim: false                  # C simulation only (fast)
+  csynth: true                 # C synthesis (slower; produces resource/timing report)
+  cosim: false                 # C/RTL co-simulation (slow)
+  export: false                # export packaged IP / RTL

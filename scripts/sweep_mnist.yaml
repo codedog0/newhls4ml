@@ -1,0 +1,34 @@
+# ============================================================================
+# MNIST sweep: lsb_zero_k4 vs lsb_zero_k8 on the classifier head, vs a
+# standard-multiply baseline for reference.
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: baseline
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: standard}
+
+  - tag: lsb_zero_k4_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lsb_zero_k4}
+
+  - tag: lsb_zero_k8_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lsb_zero_k8}

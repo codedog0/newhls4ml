@@ -1,0 +1,86 @@
+# ============================================================================
+# Sweep configuration: run multiple variants of the pipeline and compare
+# reports side by side.
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep.yaml
+#
+# Each entry under `sweep:` is a variant. The variant may either:
+#   * Provide `overrides:` -- top-level keys that override the base config
+#     (e.g. mult_strategy, reuse_factor). These are merged into the base
+#     config before running.
+#   * Provide a full `pipeline:` -- replaces the entire pipeline of the
+#     base config (use this when you want different stages per variant).
+#
+# Each variant gets its own output directory under
+#     <base output_dir>_<tag>
+# so the Vivado/Vitis reports don't overwrite each other.
+# ============================================================================
+
+base_config: scripts/pipeline.yaml
+
+sweep:
+  # Baseline: exact signed multiply on the last layer (no approximation)
+  - tag: baseline
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: standard}
+        - name: set_random_lsb
+          target: last_layer
+          layer_type: Dense
+          config: {enabled: false}
+
+  # Lower-Part-OR approximate multiplier, K=4 (last layer only)
+  - tag: lpor_k4_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lpor_k4}
+        - name: set_random_lsb
+          target: last_layer
+          layer_type: Dense
+          config: {enabled: false}
+
+  # LSB-zeroing (truncated) approximate multiplier, K=4 (last layer only)
+  - tag: lsb_zero_k4_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: lsb_zero_k4}
+        - name: set_random_lsb
+          target: last_layer
+          layer_type: Dense
+          config: {enabled: false}
+
+  # 4:2-compressor-based approximate multiplier, K=4 (last layer only)
+  - tag: comp42_k4_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: comp42_k4}
+        - name: set_random_lsb
+          target: last_layer
+          layer_type: Dense
+          config: {enabled: false}
+
+  # Random-LSB approximate multiplier, K=4 (last layer only) -- NEW
+  - tag: random_lsb_k4_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: standard}
+        - name: set_random_lsb
+          target: last_layer
+          layer_type: Dense
+          config: {enabled: true, k: 4}

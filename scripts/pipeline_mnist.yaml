@@ -1,0 +1,56 @@
+# ============================================================================
+# MNIST variant of pipeline.yaml -- see pipeline.yaml for full documentation
+# of the pipeline stage taxonomy. This config targets scripts/mnist_mlp.keras
+# (784 -> 64 -> 10, ~97.2% float32 test accuracy) instead of the tiny smoke-test
+# MLP, so the approximate-multiplier comparison has a real classification
+# accuracy metric behind it (see `accuracy:` block below).
+#
+# Run from the repo root:
+#     python scripts/optimize_hls4ml.py --config scripts/pipeline_mnist.yaml
+# ============================================================================
+
+model:
+  path: ./scripts/mnist_mlp.keras
+  framework: keras
+
+backend: vitis
+project_name: mnist_mlp
+output_dir: ./hls_output_mnist
+# Same Artix-7 part as pipeline.yaml -- see OPTIMIZATION_RESULTS.md for why
+# (only Artix-7 device libraries are installed on this machine).
+part: xc7a200tfbg484-2
+clock_period: 5                # ns
+io_type: io_parallel
+
+# --- Model-wide defaults ------------------------------------------------------
+# 784x64 = 50,176 multiplies in the first Dense layer alone -- fully unrolling
+# that (ReuseFactor: 1, Strategy: Latency, as in the tiny-model pipeline.yaml)
+# is not tractable for HLS scheduling. Use Strategy: Resource with a modest
+# ReuseFactor instead (both layers' multiply counts, 50176 and 640, divide
+# evenly by 64).
+model_config:
+  Precision: fixed<16,6>
+  ReuseFactor: 64
+  Strategy: Resource
+
+# --- Pipeline: mult_strategy on the last Dense layer only (classifier head) -
+# Sweep variants (scripts/sweep_mnist.yaml) replace this `pipeline:` list
+# entirely with one `set_mult_strategy` stage picking the strategy under test.
+pipeline:
+  - name: set_mult_strategy
+    target: last_layer
+    layer_type: Dense
+    config:
+      mult_strategy: standard
+
+# --- Accuracy check: use the real MNIST test set instead of random noise ----
+accuracy:
+  dataset: mnist
+  n_samples: 1000
+
+synthesis:
+  enabled: true
+  csim: false
+  csynth: true
+  cosim: false
+  export: false
