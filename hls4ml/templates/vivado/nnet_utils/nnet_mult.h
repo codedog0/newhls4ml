@@ -529,6 +529,152 @@ template <class x_T, class w_T> class random_lsb_k8 : public Product {
     }
 };
 
+/* ---
+ * Mitchell's Logarithmic Approximate Multiplier
+ *
+ * Unlike the LPOR / lsb_zero / comp42 / random_lsb approximators above (which
+ * all keep a real hi/hi, hi/lo, lo/hi partial-product multiply and only
+ * approximate the low k x k quadrant), Mitchell's algorithm replaces the
+ * multiply entirely with an add:
+ *
+ *   1. Take the sign/magnitude of each operand. log2(magnitude) is
+ *      approximated as `exponent + mantissa`, where `exponent` is the index
+ *      of the magnitude's leading (most-significant) set bit -- found via a
+ *      leading-one detector (priority encoder) -- and `mantissa` is the
+ *      value's remaining lower bits, left-justified into a fixed-point
+ *      fraction in [0, 1). This is the classic linear approximation
+ *      log2(1+x) ~= x for x in [0, 1).
+ *   2. log2(product) ~= log2(|a|) + log2(|w|), computed as an exponent add
+ *      plus a mantissa add (with carry-out bumping the exponent by one when
+ *      the mantissas overflow past 1.0).
+ *   3. The approximate magnitude is reconstructed from the summed
+ *      exponent/mantissa by re-inserting the implicit leading one and
+ *      shifting -- the same leading-one-detect-then-shift structure as step
+ *      1, run in reverse.
+ *   4. The original operand signs are XORed back onto the result.
+ *
+ * No multiplier is inferred anywhere in this path -- only a priority
+ * encoder, a fixed-point add, and two variable (data-dependent) shifts, so
+ * this is the one strategy in this file with a real chance of moving DSP
+ * usage rather than just LUTs.
+ *
+ * Because log2(1+x) is concave and matches the chord y=x only at its
+ * endpoints x=0 and x=1, log2(1+x) >= x everywhere in between: the
+ * approximation always UNDERESTIMATES log2(magnitude), so the reconstructed
+ * product is always <= the true magnitude in absolute value -- Mitchell's
+ * algorithm never overestimates. The worst case is x=0.5 on both operands,
+ * giving the textbook maximum relative error of ~11.1%; mean relative error
+ * over uniformly distributed operands is a few percent. See
+ * scripts/verify_mitchell.py for a bit-exact Python re-derivation of this
+ * bound.
+ *
+ * Assumes WA = x_T::width >= 2 and WW = w_T::width >= 2 (true for every
+ * hls4ml precision type used in practice); degenerate 1-bit operands are not
+ * handled specially, same as this file's existing K-guard conventions.
+ * --- */
+template <class x_T, class w_T> class mitchell_base : public Product {
+  public:
+    static auto product(x_T a, w_T w) -> decltype(a * w) {
+        #pragma HLS INLINE
+        using r_T = decltype(a * w);
+        static const int WA = x_T::width;
+        static const int WW = w_T::width;
+        static const int WOUT = WA + WW;
+        static const int MANT_A = WA - 1;
+        static const int MANT_W = WW - 1;
+        static const int MANT_BITS = (MANT_A > MANT_W) ? MANT_A : MANT_W;
+
+        ap_int<WA> raw_a;
+        raw_a.range(WA - 1, 0) = a.range(WA - 1, 0);
+        ap_int<WW> raw_w;
+        raw_w.range(WW - 1, 0) = w.range(WW - 1, 0);
+
+        if (raw_a == 0 || raw_w == 0) {
+            r_T zero_result = 0;
+            return zero_result;
+        }
+
+        // Sign/magnitude split -- Mitchell's algorithm operates on unsigned
+        // magnitudes via leading-one detection, so (unlike the LPOR-style
+        // hi/lo split used by the other approximators) signedness has to be
+        // pulled out explicitly up front and re-applied at the end.
+        bool sign_a = raw_a[WA - 1];
+        bool sign_w = raw_w[WW - 1];
+        bool neg_result = sign_a ^ sign_w;
+
+        ap_uint<WA> mag_a = sign_a ? ap_uint<WA>(-raw_a) : ap_uint<WA>(raw_a);
+        ap_uint<WW> mag_w = sign_w ? ap_uint<WW>(-raw_w) : ap_uint<WW>(raw_w);
+
+        // Leading-one detection (priority encoder): exp_* = index of the
+        // highest set bit. mag_a/mag_w are both nonzero here (the raw_a/raw_w
+        // == 0 case was already handled above), so exactly one of these
+        // unrolled comparisons wins for each operand.
+        int exp_a = 0;
+        bool found_a = false;
+        for (int i = WA - 1; i >= 0; i--) {
+            #pragma HLS UNROLL
+            if (!found_a && mag_a[i]) {
+                exp_a = i;
+                found_a = true;
+            }
+        }
+        int exp_w = 0;
+        bool found_w = false;
+        for (int i = WW - 1; i >= 0; i--) {
+            #pragma HLS UNROLL
+            if (!found_w && mag_w[i]) {
+                exp_w = i;
+                found_w = true;
+            }
+        }
+
+        // Left-justify the bits below the leading one into a fixed-width
+        // fractional mantissa (variable/data-dependent shift -- the "shift"
+        // half of Mitchell's leading-one-detect-then-shift structure).
+        ap_uint<WA> mag_a_norm = ap_uint<WA>(mag_a) << (MANT_A - exp_a);
+        ap_uint<MANT_A> mant_a = mag_a_norm.range(MANT_A - 1, 0);
+        ap_uint<WW> mag_w_norm = ap_uint<WW>(mag_w) << (MANT_W - exp_w);
+        ap_uint<MANT_W> mant_w = mag_w_norm.range(MANT_W - 1, 0);
+
+        // Add the two mantissas at a common (widest) width, then add the
+        // exponents -- this is the "multiply becomes add" step. A carry out
+        // of the mantissa add means mant_a + mant_w >= 1.0, so it bumps the
+        // combined exponent by one (matching normal log addition).
+        ap_uint<MANT_BITS> mant_a_ext = ap_uint<MANT_BITS>(mant_a) << (MANT_BITS - MANT_A);
+        ap_uint<MANT_BITS> mant_w_ext = ap_uint<MANT_BITS>(mant_w) << (MANT_BITS - MANT_W);
+        ap_uint<MANT_BITS + 1> sum_frac = ap_uint<MANT_BITS + 1>(mant_a_ext) + ap_uint<MANT_BITS + 1>(mant_w_ext);
+        bool carry = sum_frac[MANT_BITS];
+        ap_uint<MANT_BITS> mant_sum = sum_frac.range(MANT_BITS - 1, 0);
+        int exp_sum = exp_a + exp_w + (carry ? 1 : 0);
+
+        // Reconstruct the magnitude: re-insert the implicit leading one,
+        // then shift back out to its final position (the inverse of the
+        // leading-one-detect-then-shift used to build the mantissas above).
+        ap_uint<MANT_BITS + 1> normalized = (ap_uint<MANT_BITS + 1>(1) << MANT_BITS) | ap_uint<MANT_BITS + 1>(mant_sum);
+        int shift = exp_sum - MANT_BITS;
+        ap_uint<WOUT> result_mag;
+        if (shift >= 0) {
+            result_mag = ap_uint<WOUT>(normalized) << shift;
+        } else {
+            result_mag = ap_uint<WOUT>(normalized) >> (-shift);
+        }
+
+        ap_int<WOUT> raw_result = neg_result ? ap_int<WOUT>(-ap_int<WOUT>(result_mag)) : ap_int<WOUT>(result_mag);
+
+        r_T result;
+        result.range(WOUT - 1, 0) = raw_result.range(WOUT - 1, 0);
+        return result;
+    }
+};
+
+template <class x_T, class w_T> class mitchell : public Product {
+  public:
+    static auto product(x_T a, w_T w) -> decltype(a * w) {
+        #pragma HLS INLINE
+        return mitchell_base<x_T, w_T>::product(a, w);
+    }
+};
+
 template <class x_T, class w_T> class weight_exponential : public Product {
   public:
     using r_T = ap_fixed<2 * (decltype(w_T::weight)::width + x_T::width), (decltype(w_T::weight)::width + x_T::width)>;

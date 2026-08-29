@@ -108,6 +108,11 @@ class FPGABackend(Backend):
         #   - comp42_k4 / k8  : 4:2-compressor-based approximate multiplier (k = 4 or 8)
         #   - random_lsb_k4/k8 : replace the lo*lo quadrant with a pseudo-random bit pattern
         #                        (no arithmetic on the LSBs -> saves LUTs)
+        #   - mitchell        : Mitchell's logarithmic approximate multiplier -- replaces
+        #                        the multiply entirely with a leading-one-detect + add +
+        #                        shift (no lo*lo quadrant to approximate; the whole
+        #                        operand range is approximated, bounded by ~11.1% max
+        #                        relative error)
         mult_strategy_description = (
             'Multiplier implementation to use: the exact product ("standard"); a '
             'Lower-Part-OR (LPOR) approximate multiplier that replaces the bottom k x k '
@@ -116,11 +121,15 @@ class FPGABackend(Backend):
             'zero before an ordinary exact multiply ("lsb_zero_k4"/"lsb_zero_k8"); a 4:2-compressor-'
             'based approximate multiplier that replaces the bottom k x k quadrant with '
             'a partial-product-reduction tree built from (4:2) counters '
-            '("comp42_k4"/"comp42_k8"); or a random-LSB approximate multiplier that '
+            '("comp42_k4"/"comp42_k8"); a random-LSB approximate multiplier that '
             'replaces the bottom k x k quadrant with a pseudo-random bit pattern '
             'derived from an LFSR seed, performing NO arithmetic on the LSBs -- this '
             'saves LUTs because the entire lo*lo multiplier collapses to constants '
-            '("random_lsb_k4"/"random_lsb_k8").'
+            '("random_lsb_k4"/"random_lsb_k8"); or Mitchell\'s logarithmic approximate '
+            'multiplier, which replaces the multiply entirely with a leading-one-detect, '
+            'a fixed-point add, and a shift -- no partial-product multiplier is inferred '
+            'at all, at the cost of a bounded ~11.1% worst-case relative error across '
+            'the full operand range ("mitchell").'
         )
         mult_strategy_choices = [
             'standard',
@@ -132,6 +141,7 @@ class FPGABackend(Backend):
             'comp42_k8',
             'random_lsb_k4',
             'random_lsb_k8',
+            'mitchell',
         ]
 
         dense_attrs = self.attribute_map.get(Dense, [])

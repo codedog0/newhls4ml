@@ -1,0 +1,30 @@
+# ============================================================================
+# MNIST sweep: Mitchell's logarithmic approximate multiplier on the classifier
+# head, vs a standard-multiply baseline for reference.
+#
+# Each variant writes to its own `hls_output_mnist_<tag>/` directory (via
+# `optimize_hls4ml.py`'s sweep tagging), so the baseline and mitchell results
+# are kept separate on disk.
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: baseline
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: standard}
+
+  - tag: mitchell_last
+    overrides:
+      pipeline:
+        - name: set_mult_strategy
+          target: last_layer
+          layer_type: Dense
+          config: {mult_strategy: mitchell}

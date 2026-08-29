@@ -41,7 +41,7 @@ import yaml
 
 VALID_MULT_STRATEGIES = {
     'standard', 'lpor_k4', 'lpor_k8', 'lsb_zero_k4', 'lsb_zero_k8', 'comp42_k4', 'comp42_k8',
-    'random_lsb_k4', 'random_lsb_k8',
+    'random_lsb_k4', 'random_lsb_k8', 'mitchell',
 }
 VALID_STRATEGIES = {'Latency', 'Resource', 'ResourceUnrolled', 'DistributedArithmetic'}
 

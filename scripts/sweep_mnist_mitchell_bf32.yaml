@@ -1,0 +1,47 @@
+# ============================================================================
+# MNIST sweep: Mitchell's logarithmic approximate multiplier on dense_1
+# (784->64) at ReuseFactor=1568 (block_factor = 50,176 / 1568 = 32) -- fills
+# the gap between block_factor=16 (RF=3136) and block_factor=64 (RF=784) in
+# scripts/MITCHELL_MULTILAYER_RESULTS.md.
+#
+# RF=1568 > n_in (784), so this stays in the `rf_gt_nin_rem0` codegen branch
+# -- same kernel family as the block_factor=8/16 data points, giving a clean
+# 3-point trend (8, 16, 32) within one kernel before the block_factor=64 point
+# switches to `rf_leq_nin`.
+#
+# Two variants, both fresh synthesis runs, written under ./output/:
+#   baseline_bf32       -- standard exact multiply, dense_1 RF=1568, dense_2 default
+#   mitchell_first_bf32 -- mitchell on dense_1 (RF=1568) only, dense_2 left standard
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_bf32.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: baseline_bf32
+    overrides:
+      output_dir: ./output/hls_output_mnist_baseline_bf32
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 1568}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1, dense_2]
+          config: {mult_strategy: standard}
+
+  - tag: mitchell_first_bf32
+    overrides:
+      output_dir: ./output/hls_output_mnist_mitchell_first_bf32
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 1568}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1]
+          config: {mult_strategy: mitchell}

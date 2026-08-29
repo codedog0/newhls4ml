@@ -1,0 +1,43 @@
+# ============================================================================
+# MNIST sweep: Mitchell's logarithmic approximate multiplier on dense_1
+# (784->64) at ReuseFactor=3136 (block_factor = 50,176 / 3136 = 16) --
+# a second data point alongside the RF=6272 (block_factor=8) results in
+# scripts/MITCHELL_MULTILAYER_RESULTS.md.
+#
+# Two variants only (baseline + mitchell on dense_1), both fresh synthesis
+# runs, written under ./output/ instead of the repo root:
+#   baseline_rf3136       -- standard exact multiply, dense_1 RF=3136, dense_2 default
+#   mitchell_first_rf3136 -- mitchell on dense_1 (RF=3136) only, dense_2 left standard
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_rf3136.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: baseline_rf3136
+    overrides:
+      output_dir: ./output/hls_output_mnist_baseline_rf3136
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 3136}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1, dense_2]
+          config: {mult_strategy: standard}
+
+  - tag: mitchell_first_rf3136
+    overrides:
+      output_dir: ./output/hls_output_mnist_mitchell_first_rf3136
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 3136}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1]
+          config: {mult_strategy: mitchell}

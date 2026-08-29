@@ -1,0 +1,60 @@
+# ============================================================================
+# MNIST sweep: Mitchell's logarithmic approximate multiplier applied to more
+# than just the last layer -- isolates the first Dense layer (784->64, the
+# dominant multiply/DSP consumer: 50,176 multiplies vs. the last layer's 640)
+# from the combination of both layers.
+#
+# dense_1 is forced to a much higher ReuseFactor (6272, giving block_factor=8)
+# to keep csynth tractable -- the `baseline_hirf` variant re-runs the SAME RF
+# on the standard multiplier, so the comparison isolates the multiplier-
+# strategy effect and doesn't conflate it with the RF change. This
+# deliberately does NOT match the main report's uniform ReuseFactor=64 model
+# config -- see the results doc for why.
+#
+# Three variants, all fresh synthesis runs, each in its own output dir:
+#   baseline_hirf       -- standard exact multiply, dense_1 RF=6272, dense_2 default
+#   mitchell_first_hirf -- mitchell on dense_1 (RF=6272) only, dense_2 left standard
+#   mitchell_all_hirf   -- mitchell on both dense_1 (RF=6272) and dense_2 (default RF)
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_multilayer.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: baseline_hirf
+    overrides:
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 6272}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1, dense_2]
+          config: {mult_strategy: standard}
+
+  - tag: mitchell_first_hirf
+    overrides:
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 6272}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1]
+          config: {mult_strategy: mitchell}
+
+  - tag: mitchell_all_hirf
+    overrides:
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 6272}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1, dense_2]
+          config: {mult_strategy: mitchell}
