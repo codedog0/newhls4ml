@@ -1,0 +1,63 @@
+# ============================================================================
+# MNIST sweep: a DSP-over-100%-of-budget baseline, brought back under 100%
+# by switching dense_1 to Mitchell -- while staying within block_factors
+# already validated as tractable (see scripts/MITCHELL_MULTILAYER_RESULTS.md's
+# scaling table: bf=64 for dense_1 took ~6m20s for mitchell; bf=896 stalled
+# for 2h20m+ and was killed).
+#
+# Layer config (both variants):
+#   dense_1 (784->64, 50,176 multiplies): ReuseFactor=392 -> block_factor=128
+#     (only 2x beyond the largest confirmed-tractable point, 64)
+#   dense_2 (64->10, 640 multiplies): ReuseFactor=1 -> block_factor=640
+#     (fully unrolled; always `standard` in both variants, so this stays a
+#     plain DSP-bound design regardless of size -- no mitchell risk here)
+#
+# Expected whole-design DSP (dense_1 + dense_2 + ~10 "other" overhead observed
+# consistently across every prior variant in this file):
+#   over100_baseline: ~128 + 640 + 10 = 778  (778/740 = 105%, OVER budget)
+#   over100_mitchell: ~0   + 640 + 10 = 650  (650/740 = 88%,  under budget)
+#
+# Usage:
+#     python scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_over100dsp.yaml
+# ============================================================================
+
+base_config: scripts/pipeline_mnist.yaml
+
+sweep:
+  - tag: over100_baseline
+    overrides:
+      output_dir: ./output/hls_output_mnist_over100_baseline
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 392}
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_2]
+          config: {reuse_factor: 1}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1, dense_2]
+          config: {mult_strategy: standard}
+
+  - tag: over100_mitchell
+    overrides:
+      output_dir: ./output/hls_output_mnist_over100_mitchell
+      pipeline:
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_1]
+          config: {reuse_factor: 392}
+        - name: set_reuse_factor
+          target: by_name
+          names: [dense_2]
+          config: {reuse_factor: 1}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_1]
+          config: {mult_strategy: mitchell}
+        - name: set_mult_strategy
+          target: by_name
+          names: [dense_2]
+          config: {mult_strategy: standard}

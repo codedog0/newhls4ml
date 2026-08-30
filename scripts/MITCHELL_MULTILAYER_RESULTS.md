@@ -203,9 +203,58 @@ precision, same default RF=64 in both runs.
   technique, distinct from (and in addition to) the accuracy/area trade-offs
   already documented for the last-layer-only case.
 
+## Attempt: baseline over 100% DSP, brought back under with mitchell
+
+Goal: reproduce the over-100%-DSP-budget situation that `baseline_default_rf`
+already showed (916/740 = 124%, RF=56/block_factor=896), but avoid
+re-attempting `mitchell` at that exact block_factor since it's the one that
+stalled for 2h20m+ (see above). Plan: push `dense_1` only modestly beyond the
+largest confirmed-tractable point (block_factor=64) to block_factor=**128**
+(`ReuseFactor=392`), and fully unroll `dense_2` (`ReuseFactor=1`,
+block_factor=640, left on `standard` in both variants -- never run mitchell
+there, so no new synthesis-time risk is introduced on that layer) to push the
+combined DSP count over budget without needing a large jump on `dense_1`.
+
+```bash
+python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_over100dsp.yaml
+```
+
+**Result -- the assumption behind the plan was wrong, worth recording.**
+`dense_2` fully unrolled did *not* synthesize to ~640 DSP (1 per multiply, the
+pattern `dense_1` has followed exactly at every block_factor tested) -- it
+came in at **547 DSP**, presumably from some DSP-packing/sharing Vitis applies
+at full parallelism that doesn't show up at `dense_1`'s more modest
+block_factors. So the intended over-100% baseline landed under budget instead:
+
+| variant             | dense_1 DSP (bf=128) | dense_2 DSP (fully unrolled) | other | whole-design DSP | DSP %  | LUT     | FF      | EstClk |
+|------------------------|:---------------------:|:-----------------------------:|:-----:|:-----------------:|:------:|--------:|--------:|:------:|
+| `over100_baseline`     | 128                   | 547                            | 10    | 685                | 92.6%  | 35,236  | 109,684 | 3.707  |
+| `over100_mitchell`     | **0**                 | 547                            | 10    | 557                | 75.3%  | 166,526 | 194,065 | 3.707  |
+
+(dense_1 module numbers: baseline DSP=128/LUT=5,850, mitchell DSP=0/LUT=137,140
+-- DSP-elimination and the sub-linear-but-weakening LUT-scaling trend both
+continue to hold at block_factor=128, consistent with every prior data point.
+dense_2 module: DSP=547/LUT=15,404/EstClk=3.650 in both variants, since it was
+never switched to mitchell here. Accuracy/MSE match the other `mitchell_first_*`
+rows exactly: HLS acc 0.9620 vs 0.9640 baseline vs mitchell, softmax MSE
+4.49e-04 vs 5.96e-04 -- unaffected by `dense_2`'s reuse factor, as expected.)
+
+**Bottom line**: this specific pairing didn't cross the 100% DSP threshold
+(92.6% -> 75.3%, both under budget) -- it demonstrates the same DSP-reduction
+mechanism one more time, at a new block_factor (128) and with a fully-unrolled
+neighboring layer, but not literally "over 100% -> under 100%". Getting
+`dense_1` to block_factor=256 (`ReuseFactor=196`) would likely push the
+baseline to ~110% (256+547+10=813), but that's another 2x step on `dense_1`
+beyond the now-longest completed mitchell run (128 took 30m53s, up from 64's
+6m20s), so a real risk of a multi-hour run -- not attempted, left as a
+documented option rather than run speculatively.
+
 ## Files touched
 
 ```
+scripts/sweep_mnist_mitchell_over100dsp.yaml   # 2-variant sweep (over100_baseline, over100_mitchell),
+                                                # dense_1 at ReuseFactor=392 (block_factor=128) + dense_2 fully
+                                                # unrolled (ReuseFactor=1); writes under ./output/
 scripts/sweep_mnist_mitchell_multilayer.yaml   # 3-variant sweep (baseline_hirf, mitchell_first_hirf, mitchell_all_hirf),
                                                 # forces dense_1 to ReuseFactor=6272 for tractability
 scripts/sweep_mnist_mitchell_rf3136.yaml       # 2-variant sweep (baseline_rf3136, mitchell_first_rf3136),
@@ -244,6 +293,7 @@ python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_multilay
 python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_rf3136.yaml
 python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_bf32.yaml
 python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_bf64.yaml
+python3 scripts/optimize_hls4ml.py --sweep scripts/sweep_mnist_mitchell_over100dsp.yaml
 
 # whole-design summary table:
 python3 scripts/summarize_reports.py
