@@ -1,0 +1,58 @@
+# ============================================================================
+# Standalone IP-export config for the `over100_baseline` variant from
+# scripts/sweep_mnist_mitchell_over100dsp.yaml (see that file and
+# scripts/MITCHELL_MULTILAYER_RESULTS.md's "Attempt: baseline over 100% DSP"
+# section for the full story). Same layer config as that sweep tag:
+#
+#   dense_1 (784->64): ReuseFactor=392 -> block_factor=128, standard multiply
+#   dense_2 (64->10):  ReuseFactor=1   -> block_factor=640, standard multiply
+#
+# Unlike the sweep (csynth only), this also runs `export: true` to package a
+# Vivado IP core, writing to the SAME output dir as the sweep tag so re-runs
+# (e.g. after retraining scripts/mnist_mlp.keras) update the project in place.
+#
+# Usage (see scripts/OPTIMIZATION_RESULTS.md "How to reproduce" for the full
+# environment setup -- PATH/XILINX_* vars -- this needs the Vitis toolchain):
+#     python3 scripts/optimize_hls4ml.py --config scripts/pipeline_mnist_over100_baseline_ip.yaml
+# ============================================================================
+
+model:
+  path: ./scripts/mnist_mlp.keras
+  framework: keras
+
+backend: vitis
+project_name: myproject_over100_baseline
+output_dir: ./output/hls_output_mnist_over100_baseline
+part: xc7a200tfbg484-2
+clock_period: 5                # ns
+io_type: io_parallel
+
+model_config:
+  Precision: fixed<16,6>
+  ReuseFactor: 64
+  Strategy: Resource
+
+pipeline:
+  - name: set_reuse_factor
+    target: by_name
+    names: [dense_1]
+    config: {reuse_factor: 392}
+  - name: set_reuse_factor
+    target: by_name
+    names: [dense_2]
+    config: {reuse_factor: 1}
+  - name: set_mult_strategy
+    target: by_name
+    names: [dense_1, dense_2]
+    config: {mult_strategy: standard}
+
+accuracy:
+  dataset: mnist
+  n_samples: 1000
+
+synthesis:
+  enabled: true
+  csim: false
+  csynth: true
+  cosim: false
+  export: true

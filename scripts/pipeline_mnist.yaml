@@ -1,7 +1,7 @@
 # ============================================================================
 # MNIST variant of pipeline.yaml -- see pipeline.yaml for full documentation
 # of the pipeline stage taxonomy. This config targets scripts/mnist_mlp.keras
-# (784 -> 64 -> 10, ~97.2% float32 test accuracy) instead of the tiny smoke-test
+# (784 -> 64 -> 10, ~97.6% float32 test accuracy) instead of the tiny smoke-test
 # MLP, so the approximate-multiplier comparison has a real classification
 # accuracy metric behind it (see `accuracy:` block below).
 #

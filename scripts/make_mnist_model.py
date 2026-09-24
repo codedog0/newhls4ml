@@ -27,7 +27,17 @@ def main():
         name='mnist_mlp',
     )
     model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    model.fit(x_train, y_train, epochs=8, batch_size=128, validation_split=0.1, verbose=2)
+
+    callbacks = [
+        keras.callbacks.EarlyStopping(
+            monitor='val_accuracy', patience=8, restore_best_weights=True),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss', factor=0.5, patience=3, min_lr=1e-5),
+    ]
+    model.fit(
+        x_train, y_train, epochs=60, batch_size=128, validation_split=0.1,
+        callbacks=callbacks, verbose=2,
+    )
 
     loss, acc = model.evaluate(x_test, y_test, verbose=0)
     print(f"Test accuracy (float32 keras): {acc:.4f}")
